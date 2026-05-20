@@ -41,6 +41,8 @@ components:
     enabled: true
   sgecore:
     enabled: true
+  scheduler:
+    enabled: true
 
 # ---------------------------------------------------------------------------
 # Container images

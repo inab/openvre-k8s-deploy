@@ -12,6 +12,20 @@ spec:
     matchLabels:
       app: dashboard-frontend
 ---
+{{- if .Values.hardening.podDisruptionBudgets.enabled }}
+{{- if .Values.components.frontend.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: scheduler
+  labels:
+    app.kubernetes.io/part-of: bsc-tre
+spec:
+  minAvailable: {{ .Values.hardening.podDisruptionBudgets.minAvailable }}
+  selector:
+    matchLabels:
+      app: scheduler
+---
 {{- end }}
 {{- if .Values.components.keycloak.enabled }}
 apiVersion: policy/v1
