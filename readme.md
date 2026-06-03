@@ -301,6 +301,28 @@ frontend:
 
 `domain.host` must stay as just the hostname because Kubernetes Ingress hosts cannot include a port. `keycloak.frontendUrl` includes `:30080` because this lab setup exposes ingress-nginx through a NodePort, and Keycloak redirects must exactly match the browser URL.
 
+### Keycloak realm import (automatic OIDC setup)
+
+The chart ships `files/keycloak/realm-sample.json` (same export as `openVRE-core-dev/keycloak/realms/realm-sample.json` in the openvre-dev-kubernetes repo). When `keycloak.realmImport.enabled` is `true` (default in `values.yaml`):
+
+1. An init container patches the JSON (client secret, redirect URIs for `domain.host`, optional users).
+2. Keycloak 26 starts with `--import-realm` and loads `project-realm.json` (or `<keycloak.realm>-realm.json`).
+
+Align these values with the bundled export (simplest path):
+
+| Value | Default |
+|--------|---------|
+| `keycloak.realm` | `project` |
+| `keycloak.realmImport.oidcClientId` | `open-vre` |
+| `frontend.env.keycloakClient` | `open-vre` |
+| `secrets.frontend.keycloakSecret` | your client secret |
+
+Default test user (when `keycloak.realmImport.users` is set): `vreuser` / `vreuser`.
+
+**Re-import:** Keycloak stores realm state in PostgreSQL. To apply a fresh realm JSON on an existing install, delete the Postgres PVC for Keycloak (`dashboard-postgres` data) or use a new namespace, then `helm upgrade --install`. `keycloak.realmImport.importStrategy: OVERWRITE_EXISTING` updates an existing realm on startup when the import file is present.
+
+To disable import and configure Keycloak manually, set `keycloak.realmImport.enabled: false`.
+
 If OpenVRE is already installed, apply the values:
 
 ```bash

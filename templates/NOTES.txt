@@ -39,13 +39,19 @@ MongoDB:
 
 IMPORTANT — before first use:
 {{- if .Values.keycloak.realmImport.enabled }}
-  1. (Realm import is enabled.) Ensure secrets.frontend.keycloakSecret matches the
-     patched secret for client "{{ .Values.keycloak.realmImport.oidcClientId }}".
+  1. Realm "{{ .Values.keycloak.realm }}" is imported on Keycloak startup (client
+     "{{ .Values.keycloak.realmImport.oidcClientId }}"). Set secrets.frontend.keycloakSecret
+     to the OIDC client secret (init container patches it into the realm JSON).
+{{- if .Values.keycloak.realmImport.users }}
+  2. Test user(s) from keycloak.realmImport.users are included in the import.
+{{- else }}
+  2. Create at least one Keycloak user in the "{{ .Values.keycloak.realm }}" realm.
+{{- end }}
 {{- else }}
   1. Create a Keycloak client named "{{ .Values.frontend.env.keycloakClient }}" and
      set secrets.frontend.keycloakSecret to the client secret.
-{{- end }}
   2. Create at least one Keycloak user in the "{{ .Values.keycloak.realm }}" realm.
+{{- end }}
 {{- if and .Values.dashboardMongo.initDocuments.enabled .Values.dashboardMongo.initDocuments.useBundledDefaults }}
   3. MongoDB tool metadata is seeded from bundled JSON on first empty volume (see README).
 {{- else }}

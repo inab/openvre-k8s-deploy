@@ -68,7 +68,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: scheduler
-          image: {{ .Values.scheduler.image.repository }}:{{ .Values.scheduler.image.tag }}
+          image: {{ .Values.images.scheduler.repository }}:{{ .Values.images.scheduler.tag }}
           env:
             - name: DEFAULT_NAMESPACE
               value: {{ .Release.Namespace | quote }}

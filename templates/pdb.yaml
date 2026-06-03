@@ -12,8 +12,8 @@ spec:
     matchLabels:
       app: dashboard-frontend
 ---
-{{- if .Values.hardening.podDisruptionBudgets.enabled }}
-{{- if .Values.components.frontend.enabled }}
+{{- end }}
+{{- if .Values.components.scheduler.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

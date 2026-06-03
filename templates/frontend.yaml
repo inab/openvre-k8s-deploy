@@ -26,7 +26,7 @@ metadata:
 data:
   FRONTEND_HOST_PATH: {{ .Values.frontend.env.frontendHostPath | quote }}
   KEYCLOAK_CLIENT: {{ .Values.frontend.env.keycloakClient | quote }}
-  KEYCLOAK_SERVER: {{ printf "http://dashboard-keycloak.%s.svc.cluster.local:8080/auth" .Release.Namespace | quote }}
+  KEYCLOAK_SERVER: {{ printf "http://%s/auth" .Values.domain.host | quote }}
   MAIL_HOST: {{ .Values.frontend.env.mailHost | quote }}
   MAIL_USER: {{ .Values.frontend.env.mailUser | quote }}
   MONGO_SERVER: {{ printf "dashboard-mongodb.%s.svc.cluster.local:27017" .Release.Namespace | quote }}
@@ -248,6 +248,10 @@ spec:
     spec:
       serviceAccountName: dashboard-frontend
       automountServiceAccountToken: false
+      {{- with .Values.frontend.hostAliases }}
+      hostAliases:
+{{ toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
@@ -277,7 +281,7 @@ spec:
           command:
             - bash
             - -c
-            - export MONGO_CREDENTIALS="${MONGO_INITDB_USERNAME}:${MONGO_INITDB_PASSWORD}" && /opt/docker/bin/entrypoint.sh supervisord
+            - export MONGO_CREDENTIALS="${MONGO_INITDB_USERNAME}:${MONGO_INITDB_PASSWORD}" && sed -i "s/\$authorizationUrl = \$provider->getAuthorizationUrl();/\$authorizationUrl = \$provider->getAuthorizationUrl(['scope' => \"openid profile email\"]);/" /var/www/html/openVRE/public/applib/loginToken.php && /opt/docker/bin/entrypoint.sh supervisord
           envFrom:
             - configMapRef:
                 name: dashboard-frontend-env
@@ -357,6 +361,13 @@ spec:
     - host: {{ .Values.domain.host | quote }}
       http:
         paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard-keycloak
+                port:
+                  number: {{ .Values.keycloak.service.port }}
           - path: /
             pathType: Prefix
             backend:
@@ -367,6 +378,13 @@ spec:
     {{- else }}
     - http:
         paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard-keycloak
+                port:
+                  number: {{ .Values.keycloak.service.port }}
           - path: /
             pathType: Prefix
             backend:
