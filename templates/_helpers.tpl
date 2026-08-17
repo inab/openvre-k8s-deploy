@@ -60,3 +60,22 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Frontend hostAliases: manual list wins; else optional auto-map domain.host -> ingress ClusterIP
+so in-pod OIDC calls to http://<domain>/auth reach the ingress controller (same path as browsers).
+*/}}
+{{- define "openvre.frontendHostAliases" -}}
+{{- if .Values.frontend.hostAliases }}
+{{- toYaml .Values.frontend.hostAliases }}
+{{- else if and .Values.domain.host .Values.frontend.hostAliasesAutoIngress }}
+{{- $ns := .Values.frontend.ingressLookup.namespace | default "ingress-nginx" }}
+{{- $svcName := .Values.frontend.ingressLookup.service | default "ingress-nginx-controller" }}
+{{- $ingSvc := lookup "v1" "Service" $ns $svcName }}
+{{- if and $ingSvc $ingSvc.spec.clusterIP }}
+- ip: {{ $ingSvc.spec.clusterIP | quote }}
+  hostnames:
+    - {{ .Values.domain.host | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

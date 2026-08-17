@@ -258,29 +258,7 @@ Check it:
 kubectl get pods,svc -n ingress-nginx
 kubectl get ingressclass
 ```
-### For Lab testing
 
-```bash
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-  -n ingress-nginx \
-  --create-namespace \
-  --set controller.hostNetwork=true \
-  --set controller.dnsPolicy=ClusterFirstWithHostNet \
-  --set controller.service.type=ClusterIP \
-  --set controller.ingressClassResource.name=nginx \
-  --set controller.ingressClass=nginx \
-  --wait
-```
-** GET CURERNT INGRESS IP*****
-```bash
-kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.clusterIP}{"\n"}'
-```
-## put this ip in 
-```bash
-frontend:
-  hostAliases:
-    - ip: "HERE"
-```
 You should see an IngressClass named `nginx` and a Service exposing ports like `80:30080/TCP` and `443:30443/TCP`.
 
 In your `my-values.yaml`, set the chart host and ingress class:

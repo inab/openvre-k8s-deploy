@@ -90,9 +90,66 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.scheduler.service.port }}
+    - to:
+        - podSelector:
+            matchLabels:
+              openvre.io/interactive: "true"
+      ports:
+        {{- range (.Values.interactive.networkPolicy.ports | default (list 8787 8888 8080)) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
     - ports:
         - protocol: TCP
           port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: interactive-session-ingress-egress
+  labels:
+    app.kubernetes.io/part-of: bsc-tre
+spec:
+  podSelector:
+    matchLabels:
+      openvre.io/interactive: "true"
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.interactive.networkPolicy.ingressNamespace | default "ingress-nginx" | quote }}
+      ports:
+        {{- range (.Values.interactive.networkPolicy.ports | default (list 8787 8888 8080)) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app: dashboard-frontend
+      ports:
+        {{- range (.Values.interactive.networkPolicy.ports | default (list 8787 8888 8080)) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

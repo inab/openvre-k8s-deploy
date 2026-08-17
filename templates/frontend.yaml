@@ -26,7 +26,7 @@ metadata:
 data:
   FRONTEND_HOST_PATH: {{ .Values.frontend.env.frontendHostPath | quote }}
   KEYCLOAK_CLIENT: {{ .Values.frontend.env.keycloakClient | quote }}
-  KEYCLOAK_SERVER: {{ printf "http://%s/auth" .Values.domain.host | quote }}
+  KEYCLOAK_SERVER: {{ .Values.keycloak.frontendUrl | default (printf "http://%s/auth" .Values.domain.host) | quote }}
   MAIL_HOST: {{ .Values.frontend.env.mailHost | quote }}
   MAIL_USER: {{ .Values.frontend.env.mailUser | quote }}
   MONGO_SERVER: {{ printf "dashboard-mongodb.%s.svc.cluster.local:27017" .Release.Namespace | quote }}
@@ -36,15 +36,23 @@ data:
   VAULT_ROLENAME: {{ .Values.frontend.env.vaultRoleName | quote }}
   VAULT_SECRET_PATH: {{ .Values.frontend.env.vaultSecretPath | quote }}
   OPENVRE_K8S_SCHEDULER_URL: {{ printf "http://scheduler.%s.svc.cluster.local:%v" .Release.Namespace .Values.scheduler.service.port | quote }}
-  OPENVRE_K8S_SCHEDULER_TOKEN: {{ .Values.scheduler.authToken | quote }}
   OPENVRE_K8S_NAMESPACE: {{ .Release.Namespace | quote }}
   OPENVRE_K8S_SHARED_PVC: {{ .Values.frontend.env.openvreK8sSharedPvc | quote }}
+  OPENVRE_K8S_USERDATA_PVC: {{ (.Values.interactive.userDataPvc | default .Values.frontend.env.openvreK8sSharedPvc) | quote }}
+  OPENVRE_K8S_ADMINDATA_PVC: {{ (.Values.interactive.adminDataPvc | default .Values.frontend.env.openvreK8sSharedPvc) | quote }}
   OPENVRE_K8S_TOOLS_PVC: {{ .Values.frontend.env.openvreK8sToolsPvc | quote }}
   OPENVRE_K8S_RUN_AS_UID: {{ .Values.frontend.env.openvreK8sRunAsUid | quote }}
   OPENVRE_K8S_RUN_AS_GID: {{ .Values.frontend.env.openvreK8sRunAsGid | quote }}
   OPENVRE_K8S_JOB_IMAGE: {{ .Values.frontend.env.openvreK8sJobImage | quote }}
   OPENVRE_K8S_JOB_TTL: {{ .Values.frontend.env.openvreK8sJobTtl | quote }}
   OPENVRE_K8S_JOB_DEADLINE: {{ .Values.frontend.env.openvreK8sJobDeadline | default "86400" | quote }}
+  OPENVRE_INTERACTIVE_DEFAULT_PORT: {{ .Values.interactive.defaultPort | quote }}
+  OPENVRE_INTERACTIVE_DEFAULT_MOUNT: {{ .Values.interactive.defaultMount | quote }}
+  OPENVRE_SHARED_DATA_PREFIX: "/shared_data"
+  OPENVRE_INTERACTIVE_AUDIT_BASE: {{ .Values.interactive.auditSidecar.outputBase | quote }}
+  {{- if .Values.interactive.defaultImage }}
+  OPENVRE_INTERACTIVE_DEFAULT_IMAGE: {{ .Values.interactive.defaultImage | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -64,8 +72,24 @@ data:
         </Directory>
         ProxyPass "/auth" "http://dashboard-keycloak.{{ .Release.Namespace }}.svc.cluster.local:8080/auth"
         ProxyPassReverse "/auth" "http://dashboard-keycloak.{{ .Release.Namespace }}.svc.cluster.local:8080/auth"
+        {{- if not .Values.interactive.disableLegacyApacheProxy }}
         RewriteEngine on
         RewriteRule ^/interactive-tool/([^/]+)/?(.*) https://$1:8090/$2 [P,L]
+        {{- else }}
+        {{- $ixPort := .Values.interactive.defaultPort | default 8787 }}
+        {{- $extBase := .Values.scheduler.externalBase | default (printf "http://%s" .Values.domain.host) }}
+        # Kubernetes interactive sessions: proxy to per-session Service (scheduler creates openvre-ix-<id>).
+        # Backend port must match interactive.defaultPort / tool Service port.
+        RewriteEngine on
+        ProxyPreserveHost On
+        RequestHeader set X-Forwarded-Proto "{{ if or (hasPrefix "https://" $extBase) .Values.domain.tlsEnabled }}https{{ else }}http{{ end }}"
+        # RStudio must know its URL prefix or it redirects to /auth-sign-in at site root (404 on Apache).
+        RewriteCond %{REQUEST_URI} ^/interactive-tool/([a-zA-Z0-9_-]+)
+        RewriteRule .* - [E=IX_PATH:/interactive-tool/%1]
+        RequestHeader set X-RStudio-Root-Path "%{IX_PATH}e" env=IX_PATH
+        RequestHeader set X-Forwarded-Prefix "%{IX_PATH}e" env=IX_PATH
+        RewriteRule ^/interactive-tool/([^/]+)/?(.*) http://openvre-ix-$1.{{ .Release.Namespace }}.svc.cluster.local:{{ $ixPort }}/$2 [P,L]
+        {{- end }}
         ErrorLog /var/log/apache/vre-error.log
         CustomLog /var/log/apache/vre.log combined
     </VirtualHost>
@@ -248,9 +272,10 @@ spec:
     spec:
       serviceAccountName: dashboard-frontend
       automountServiceAccountToken: false
-      {{- with .Values.frontend.hostAliases }}
+      {{- $hostAliases := include "openvre.frontendHostAliases" . }}
+      {{- if $hostAliases }}
       hostAliases:
-{{ toYaml . | nindent 8 }}
+{{ $hostAliases | nindent 8 }}
       {{- end }}
       securityContext:
         fsGroup: 1000
@@ -264,8 +289,11 @@ spec:
             - sh
             - -c
             - |
-              mkdir -p /shared_data/public /shared_data/userdata
+              mkdir -p /shared_data/public /shared_data/userdata /shared_data/admindata
               chmod -R 0777 /shared_data/public /shared_data/userdata || true
+              # Writable by frontend (1000) and scheduler (fsGroup 1000 / nobody).
+              chown -R 1000:1000 /shared_data/admindata || true
+              chmod 0777 /shared_data/admindata || true
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -281,11 +309,28 @@ spec:
           command:
             - bash
             - -c
-            - export MONGO_CREDENTIALS="${MONGO_INITDB_USERNAME}:${MONGO_INITDB_PASSWORD}" && sed -i "s/\$authorizationUrl = \$provider->getAuthorizationUrl();/\$authorizationUrl = \$provider->getAuthorizationUrl(['scope' => \"openid profile email\"]);/" /var/www/html/openVRE/public/applib/loginToken.php && /opt/docker/bin/entrypoint.sh supervisord
+            - |
+              export MONGO_CREDENTIALS="${MONGO_INITDB_USERNAME}:${MONGO_INITDB_PASSWORD}"
+              sed -i "s/\$authorizationUrl = \$provider->getAuthorizationUrl();/\$authorizationUrl = \$provider->getAuthorizationUrl(['scope' => \"openid profile email\"]);/" /var/www/html/openVRE/public/applib/loginToken.php
+              # Ensure UI plugins exist even if image was built without baking them in.
+              if [ ! -f /var/www/html/openVRE/public/assets/global/plugins/jquery.min.js ] && [ -d /var/www/html/openVRE/plugins-to-copy ]; then
+                mkdir -p /var/www/html/openVRE/public/assets/global/plugins
+                cp -a /var/www/html/openVRE/plugins-to-copy/. /var/www/html/openVRE/public/assets/global/plugins/
+              fi
+              /opt/docker/bin/entrypoint.sh supervisord
           envFrom:
             - configMapRef:
                 name: dashboard-frontend-env
           env:
+            - name: OPENVRE_K8S_SCHEDULER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.scheduler.authSecretName }}
+                  key: {{ .Values.scheduler.authSecretKey }}
+            {{- if .Values.interactive.password }}
+            - name: OPENVRE_INTERACTIVE_PASSWORD
+              value: {{ .Values.interactive.password | quote }}
+            {{- end }}
             - name: KEYCLOAK_SECRET
               valueFrom:
                 secretKeyRef:
@@ -354,6 +399,9 @@ metadata:
   name: dashboard-frontend
   labels:
     app.kubernetes.io/part-of: bsc-tre
+  annotations:
+    # Interactive session ingresses use priority 100; keep app catch-all lower.
+    nginx.ingress.kubernetes.io/priority: "10"
 spec:
   ingressClassName: {{ .Values.domain.ingressClassName | quote }}
   rules:

@@ -82,6 +82,8 @@ data:
 {{ .Files.Get "files/mongodb-init/sites.json" | nindent 4 }}
   tools.json: |
 {{ .Files.Get "files/mongodb-init/tools.json" | nindent 4 }}
+  tools-rstudio.json: |
+{{ .Files.Get "files/mongodb-init/tools-rstudio.json" | nindent 4 }}
 {{- else }}
   data_types.json: |
 {{ .Values.dashboardMongo.initDocuments.dataTypesJson | indent 4 }}
